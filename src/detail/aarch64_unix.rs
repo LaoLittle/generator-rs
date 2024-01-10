@@ -46,6 +46,10 @@ impl Registers {
             prefetch(ptr.add(8)); // RSP + 8
         }
     }
+
+    pub fn sp(&self) -> usize {
+        self.gpr[31 - 19]
+    }
 }
 
 pub fn initialize_call_frame(
