@@ -1,16 +1,15 @@
-use crate::rt::{guard, ContextStack};
+use crate::rt::guard;
 
-use crate::yield_::yield_now;
+use crate::stack::sys::page_size;
 use libc::{sigaction, sighandler_t, SA_ONSTACK, SA_SIGINFO, SIGBUS, SIGSEGV};
 use std::mem;
-use std::mem::MaybeUninit;
 use std::ptr::null_mut;
-use std::sync::Once;
+use std::sync::{Once, OnceLock};
 
-static mut SIG_ACTION: MaybeUninit<sigaction> = MaybeUninit::uninit();
+static SIG_ACTION: OnceLock<sigaction> = OnceLock::new();
 
 // Signal handler for the SIGSEGV and SIGBUS handlers. We've got guard pages
-// (unmapped pages) at the end of every thread's stack, so if a thread ends
+// (unmapped pages) at the end of every coroutine's stack, so if a coroutine ends
 // up running into the guard page it'll trigger this handler. We want to
 // detect these cases and print out a helpful error saying that the stack
 // has overflowed. All other signals, however, should go back to what they
@@ -32,30 +31,66 @@ unsafe extern "C" fn signal_handler(
     let addr = (*info).si_addr() as usize;
     let stack_guard = guard::current();
 
+    let ps = page_size();
+
+    if stack_guard.start - ps > addr {
+        // it is unlikely to overflow so we drop a hint to the compiler with #[cold] attribute
+        #[cold]
+        #[inline]
+        fn overflow_fallback() {
+            eprintln!(
+                "\ncoroutine in thread '{}' has overflowed its stack\n",
+                std::thread::current().name().unwrap_or("<unknown>")
+            );
+
+            std::process::abort();
+        }
+
+        overflow_fallback();
+    }
+
     if !stack_guard.contains(&addr) {
-        println!("{}", std::backtrace::Backtrace::force_capture());
         // SIG_ACTION is available after we registered our handler
-        sigaction(signum, SIG_ACTION.assume_init_ref(), null_mut());
+        sigaction(
+            signum,
+            SIG_ACTION.get().unwrap_or_else(|| {
+                eprintln!("unable to get original sigaction");
+
+                std::process::abort();
+            }),
+            null_mut(),
+        );
 
         // we are unable to handle this
         return;
     }
 
-    eprintln!(
-        "\ncoroutine in thread '{}' has overflowed its stack\n",
-        std::thread::current().name().unwrap_or("<unknown>")
-    );
+    let usage = stack_guard.end - addr;
+    let mul = (usage / ps).max(1);
+    let extended = ps * mul * 2;
 
-    ContextStack::current().top().err = Some(Box::new(crate::Error::StackErr));
+    if libc::mprotect(
+        (stack_guard.end - extended) as _,
+        extended,
+        libc::PROT_READ | libc::PROT_WRITE,
+    ) != 0
+    {
+        eprintln!(
+            "\ncoroutine in thread '{}' is unable to extend its stack\n",
+            std::thread::current().name().unwrap_or("<unknown>")
+        );
+
+        std::process::abort();
+    }
 
     let mut sigset: libc::sigset_t = mem::zeroed();
     libc::sigemptyset(&mut sigset);
     libc::sigaddset(&mut sigset, signum);
     libc::sigprocmask(libc::SIG_UNBLOCK, &sigset, null_mut());
 
-    yield_now();
-
-    std::process::abort();
+    // we go back and continue our coroutine.
+    // about the behavior of return, please see the comment of this function.
+    return;
 }
 
 #[cold]
@@ -65,9 +100,13 @@ unsafe fn init() {
     action.sa_flags = SA_SIGINFO | SA_ONSTACK;
     action.sa_sigaction = signal_handler as sighandler_t;
 
+    let mut origin = mem::zeroed();
+
     for signal in [SIGSEGV, SIGBUS] {
-        sigaction(signal, &action, SIG_ACTION.as_mut_ptr());
+        sigaction(signal, &action, &mut origin);
     }
+
+    let _ = SIG_ACTION.set(origin);
 }
 
 pub fn init_once() {
