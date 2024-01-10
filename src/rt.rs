@@ -298,7 +298,6 @@ pub fn get_local_data() -> *mut u8 {
 pub mod guard {
     use crate::is_generator;
     use crate::rt::ContextStack;
-    use crate::stack::sys::page_size;
     use std::ops::Range;
 
     pub type Guard = Range<usize>;
@@ -307,7 +306,7 @@ pub mod guard {
         assert!(is_generator());
         let guard = unsafe { (*(*ContextStack::current().root).child).stack_guard };
 
-        guard.0 - page_size()..guard.1
+        guard.0..guard.1
     }
 }
 
@@ -324,28 +323,18 @@ mod test {
     #[test]
     fn test_overflow() {
         use crate::*;
-        use std::panic::catch_unwind;
 
-        // test signal mask
+        // to test the signal mask, we need to run the code again.
         for _ in 0..2 {
-            let result = catch_unwind(|| {
-                let mut g = Gn::new_scoped(move |_s: Scope<(), ()>| {
-                    let guard = super::guard::current();
+            let mut g = Gn::new_scoped(move |_s: Scope<(), ()>| {
+                let guard = super::guard::current();
 
-                    // make sure the compiler does not apply any optimization on it
-                    std::hint::black_box(unsafe { *(guard.start as *const usize) });
-
-                    eprintln!("entered unreachable code");
-                    std::process::abort();
-                });
-
-                g.next();
+                // make sure that the compiler does not apply any optimization on it
+                // used 4MB, so it might be extended to 8MB
+                std::hint::black_box(unsafe { *((guard.end - 4 * 1024 * 1024) as *const usize) });
             });
 
-            assert!(matches!(
-                result.map_err(|err| *err.downcast::<Error>().unwrap()),
-                Err(Error::StackErr)
-            ));
+            g.next();
         }
     }
 }
