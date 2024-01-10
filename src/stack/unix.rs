@@ -4,7 +4,7 @@ use std::os::raw::c_void;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::usize;
 
-use super::SysStack;
+use super::{SysStack, MAXIMUM_SIZE};
 
 #[path = "overflow_unix.rs"]
 pub mod overflow;
@@ -30,19 +30,30 @@ const MAP_STACK: libc::c_int = 0;
 const MAP_STACK: libc::c_int = libc::MAP_STACK;
 
 pub unsafe fn allocate_stack(size: usize) -> io::Result<SysStack> {
-    const NULL: *mut libc::c_void = 0 as *mut libc::c_void;
     const PROT: libc::c_int = libc::PROT_READ | libc::PROT_WRITE;
     const TYPE: libc::c_int = libc::MAP_PRIVATE | libc::MAP_ANON | MAP_STACK;
 
-    let ptr = libc::mmap(NULL, size, PROT, TYPE, -1, 0);
+    let ptr = libc::mmap(
+        core::ptr::null_mut(),
+        MAXIMUM_SIZE,
+        libc::PROT_NONE,
+        TYPE,
+        -1,
+        0,
+    );
+
+    let top = ptr.byte_add(MAXIMUM_SIZE);
+
+    let ret = libc::mprotect(top.byte_sub(size), size, PROT);
+
+    if ret != 0 {
+        return Err(io::Error::last_os_error());
+    }
 
     if ptr == libc::MAP_FAILED {
         Err(io::Error::last_os_error())
     } else {
-        Ok(SysStack::new(
-            (ptr as usize + size) as *mut c_void,
-            ptr as *mut c_void,
-        ))
+        Ok(SysStack::new(top, ptr))
     }
 }
 
