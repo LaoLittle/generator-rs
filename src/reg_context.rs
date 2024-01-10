@@ -55,6 +55,10 @@ impl RegContext {
 
         unsafe { swap_registers(&mut cur, regs) }
     }
+
+    pub fn sp(&self) -> usize {
+        self.regs.sp()
+    }
 }
 
 #[cfg(test)]

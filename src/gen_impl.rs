@@ -11,7 +11,7 @@ use std::panic;
 use std::thread;
 
 use crate::reg_context::RegContext;
-use crate::rt::{Context, ContextStack, Error};
+use crate::rt::{Context, ContextStack};
 use crate::scope::Scope;
 use crate::stack::{Func, Stack, StackBox};
 
@@ -150,7 +150,7 @@ impl<'a, A, T, const LOCAL: bool> GeneratorObj<'a, A, T, LOCAL> {
     }
 
     /// get stack total size and used size in word
-    pub fn stack_usage(&self) -> (usize, usize) {
+    pub fn stack_usage(&self) -> usize {
         self.gen.stack_usage()
     }
 }
@@ -342,7 +342,7 @@ impl<'a, A, T> GeneratorImpl<'a, A, T> {
 
         self.f = Some(func);
 
-        let guard = (self.stack.begin() as usize, self.stack.end() as usize);
+        let guard = (self.stack.begin() as usize, self.stack.top() as usize);
         self.context.stack_guard = guard;
         self.context.regs.init_with(
             gen_init,
@@ -490,9 +490,12 @@ impl<'a, A, T> GeneratorImpl<'a, A, T> {
         self.is_started() && (self.context._ref & 0x3) != 0
     }
 
-    /// get stack total size and used size in word
-    fn stack_usage(&self) -> (usize, usize) {
-        (self.stack.size(), self.stack.get_used_size())
+    /// get stack used size
+    fn stack_usage(&self) -> usize {
+        let top = unsafe { &mut *self.context.parent };
+
+        // | bottom ----------------- used ----- top |
+        top.stack_guard.1 - top.regs.sp()
     }
 }
 
@@ -514,15 +517,5 @@ impl<'a, A, T> Drop for GeneratorImpl<'a, A, T> {
         }
 
         assert!(self.is_done());
-
-        let (total_stack, used_stack) = self.stack_usage();
-        if used_stack < total_stack {
-            // here we should record the stack in the class
-            // next time will just use
-            // set_stack_size::<F>(used_stack);
-        } else {
-            error!("stack overflow detected!");
-            panic::panic_any(Error::StackErr);
-        }
     }
 }

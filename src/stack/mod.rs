@@ -15,6 +15,12 @@ pub mod sys;
 
 pub use sys::overflow;
 
+const KB: usize = 1024;
+const MB: usize = 1024 * KB;
+const GB: usize = 1024 * MB;
+
+const MAXIMUM_SIZE: usize = 4 * GB;
+
 // must align with StackBoxHeader
 const ALIGN: usize = std::mem::size_of::<StackBoxHeader>();
 const HEADER_SIZE: usize = std::mem::size_of::<StackBoxHeader>() / std::mem::size_of::<usize>();
@@ -313,54 +319,17 @@ pub struct Stack {
 impl Stack {
     /// Allocate a new stack of `size`. If size = 0, this is a `dummy_stack`
     pub fn new(size: usize) -> Stack {
-        let track = (size & 1) != 0;
-
         let bytes = usize::max(size * std::mem::size_of::<usize>(), SysStack::min_size());
 
         let buf = SysStack::allocate(bytes, true).expect("failed to alloc sys stack");
 
         let stk = Stack { buf };
 
-        // if size is not even we do the full foot print test
-        let count = if track {
-            stk.size()
-        } else {
-            // we only check the last few words
-            8
-        };
-
-        unsafe {
-            let buf = stk.buf.bottom as *mut usize;
-            ptr::write_bytes(buf, 0xEE, count);
-        }
-
         // init the stack box usage
         let offset = stk.get_offset();
         unsafe { *offset = 1 };
 
         stk
-    }
-
-    /// get used stack size
-    pub fn get_used_size(&self) -> usize {
-        let mut offset: usize = 0;
-        unsafe {
-            let mut magic: usize = 0xEE;
-            ptr::write_bytes(&mut magic, 0xEE, 1);
-            let mut ptr = self.buf.bottom as *mut usize;
-            while *ptr == magic {
-                offset += 1;
-                ptr = ptr.offset(1);
-            }
-        }
-        let cap = self.size();
-        cap - offset
-    }
-
-    /// get the stack cap
-    #[inline]
-    pub fn size(&self) -> usize {
-        self.buf.len() / std::mem::size_of::<usize>()
     }
 
     /// Point to the high end of the allocated stack
@@ -373,6 +342,10 @@ impl Stack {
     #[allow(dead_code)]
     pub fn begin(&self) -> *mut usize {
         self.buf.bottom as *mut _
+    }
+
+    pub fn top(&self) -> *mut usize {
+        self.buf.top as _
     }
 
     /// alloc buffer on this stack
