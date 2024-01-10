@@ -111,6 +111,13 @@ pub struct Registers {
     gpr: [usize; 8],
 }
 
+// Redefinitions from rt/arch/x86_64/regs.h
+const RUSTRT_RSP: usize = 1;
+const RUSTRT_RBP: usize = 2;
+const RUSTRT_R12: usize = 4;
+const RUSTRT_R13: usize = 5;
+const RUSTRT_R14: usize = 6;
+
 impl Registers {
     pub fn new() -> Registers {
         Registers { gpr: [0; 8] }
@@ -124,6 +131,11 @@ impl Registers {
             prefetch(ptr.add(8)); // RSP + 8
         }
     }
+
+    #[inline]
+    pub fn sp(&self) -> usize {
+        self.gpr[RUSTRT_RSP]
+    }
 }
 
 pub fn initialize_call_frame(
@@ -133,13 +145,6 @@ pub fn initialize_call_frame(
     arg2: *mut usize,
     stack: &Stack,
 ) {
-    // Redefinitions from rt/arch/x86_64/regs.h
-    const RUSTRT_RSP: usize = 1;
-    const RUSTRT_RBP: usize = 2;
-    const RUSTRT_R12: usize = 4;
-    const RUSTRT_R13: usize = 5;
-    const RUSTRT_R14: usize = 6;
-
     let sp = align_down(stack.end());
 
     // These registers are frobbed by bootstrap_green_task into the right

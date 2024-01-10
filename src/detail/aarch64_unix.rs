@@ -33,6 +33,15 @@ pub struct Registers {
     gpr: [usize; 32],
 }
 
+// Callee-saved registers start at x19
+const X19: usize = 19 - 19;
+const X20: usize = 20 - 19;
+const X21: usize = 21 - 19;
+
+const FP: usize = 29 - 19;
+const LR: usize = 30 - 19;
+const SP: usize = 31 - 19;
+
 impl Registers {
     pub fn new() -> Registers {
         Registers { gpr: [0; 32] }
@@ -47,8 +56,9 @@ impl Registers {
         }
     }
 
+    #[inline]
     pub fn sp(&self) -> usize {
-        self.gpr[31 - 19]
+        self.gpr[SP]
     }
 }
 
@@ -59,15 +69,6 @@ pub fn initialize_call_frame(
     arg2: *mut usize,
     stack: &Stack,
 ) {
-    // Callee-saved registers start at x19
-    const X19: usize = 19 - 19;
-    const X20: usize = 20 - 19;
-    const X21: usize = 21 - 19;
-
-    const FP: usize = 29 - 19;
-    const LR: usize = 30 - 19;
-    const SP: usize = 31 - 19;
-
     let sp = align_down(stack.end());
 
     // These registers are frobbed by bootstrap_green_task into the right

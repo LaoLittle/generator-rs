@@ -46,6 +46,13 @@ pub struct Registers {
     gpr: [usize; 20],
 }
 
+const RA: usize = 0;
+const SP: usize = 1;
+const FP: usize = 2;
+const S0: usize = 3;
+const S1: usize = 4;
+const S2: usize = 5;
+
 impl Registers {
     pub fn new() -> Registers {
         Registers { gpr: [0; 20] }
@@ -59,6 +66,11 @@ impl Registers {
             prefetch(ptr.add(8)); // SP + 8
         }
     }
+
+    #[inline]
+    pub fn sp(&self) -> usize {
+        self.gpr[SP]
+    }
 }
 
 pub fn initialize_call_frame(
@@ -68,13 +80,6 @@ pub fn initialize_call_frame(
     arg2: *mut usize,
     stack: &Stack,
 ) {
-    const RA: usize = 0;
-    const SP: usize = 1;
-    const FP: usize = 2;
-    const S0: usize = 3;
-    const S1: usize = 4;
-    const S2: usize = 5;
-
     let sp = align_down(stack.end());
 
     // These registers are frobbed by bootstrap_green_task into the right
